@@ -1,0 +1,21 @@
+.vscode/settings.json
+.venv_volatility/
+
+__pycache__/
+*.py[cod]
+
+.ipynb_checkpoints/
+
+# Logs
+logs/*.log
+
+# Generated outputs
+output/
+
+# Local configuration
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
