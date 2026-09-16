@@ -1,0 +1,22 @@
+While defining the portfolio return i run into the problem that i can not assume return of individual stocks and the portfolio both follow log normal.
+I proceeded with the assumption that the return of the portfolio would follow log normal.
+I did not want to spend much time on this because objective of the project was to study and model volatility dynamics of real world porfolio.
+
+I observed the log return distribution of the securities are left skewed. it could be due to the fact |log(a)| < |log(1+a)| for 0<a<1
+
+
+
+
+
+Things to do in time left:
+Compare continuously rebalanced porfolio with buy and hold portfolio.
+Observe if in the stressed event the correlation between the component stocks change
+
+Refinements to be done:
+Refinement Proposed: currently the GARCH method uses the mean return observed from the train set. it should better start taking into account every obervation
+before the test observation to estimate that mean.
+Resolution: This doesn't matter, because we only have training observations as information, rest is only 
+
+To Be Done:
+Extract the non-exploratory steps from 02_GARCH.ipynb save that in separate garch.py code under src folder.
+Number the code files in src folder.
