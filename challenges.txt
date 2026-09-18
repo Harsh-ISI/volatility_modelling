@@ -20,3 +20,22 @@ Resolution: This doesn't matter, because we only have training observations as i
 To Be Done:
 Extract the non-exploratory steps from 02_GARCH.ipynb save that in separate garch.py code under src folder.
 Number the code files in src folder.
+
+
+
+Hi! I am uploading one of my project structure (the image, you should first read the image) and it's file. the thing is the project soon become un-managable for me because of the length of the notebooks and code files. I emphasize "soon", that is to say it was not any big project. I want you to tell if it could have been done better? Few insights of the project, it's just for you make sense of the project structure.
+
+Stochastic Modelling of Portfolio Returns under Volatility Dynamics • Modelled portfolio returns using Student-t GARCH and Heston stochastic-volatility models. • Simulated Monte Carlo paths to generate Value-at-Risk and Expected Shortfall forecasts, capturing volatility clustering and heavy-tailed portfolio drawdowns. • Backtested VaR achieving 5.39% 1-day violations for 95% Heston and 1.39% for 99% GARCH and evaluated model tail-loss underestimation by comparing forecast ES against realized losses (1.88% vs. 2.02% at 95%).
+
+Please let me know
+
+
+
+what mistakes i have done that it become un-managable for me, or is it always like that and i am overthinking.
+
+How should i improve this habit going forward?
+
+Given a project IS un-managable, how should one go about that.
+
+Uploading the project structure and component files 
+
