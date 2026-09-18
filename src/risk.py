@@ -522,3 +522,189 @@ def walk_forward_garch_10day(
     return pd.DataFrame(
         results
     ).set_index("Date")
+
+def walk_forward_garch(
+    returns,
+    forecast_start,
+    forecast_end,
+    dist="normal"
+):
+    """
+    Expanding-window one-step-ahead GARCH forecasting.
+    """
+
+    forecast_dates = returns.loc[
+        forecast_start:forecast_end
+    ].index
+
+    forecasts = []
+
+    for date in forecast_dates:
+
+        estimation_data = returns[
+            returns.index < date
+        ] * 100
+
+        model = arch_model(
+            estimation_data,
+            mean="Constant",
+            vol="GARCH",
+            p=1,
+            q=1,
+            dist=dist
+        )
+
+        result = model.fit(
+            update_freq=0,
+            disp="off"
+        )
+
+        forecast = result.forecast(
+            horizon=1,
+            reindex=False
+        )
+
+        variance_forecast = forecast.variance.iloc[-1, 0]
+
+        forecasts.append({
+            "Date": date,
+            "Realized_Return": returns.loc[date],
+            "Forecast_Volatility": np.sqrt(
+                variance_forecast
+            ) / 100
+        })
+
+    return pd.DataFrame(forecasts).set_index("Date")
+
+
+
+
+def summarize_risk_forecasts(
+    risk_df,
+    model,
+    horizon
+):
+    """
+    Create a summary table for VaR/ES forecasts.
+
+    Parameters
+    ----------
+    risk_df : pd.DataFrame
+        Forecast dataframe containing:
+        Realized_Return or Realized_Return_10D,
+        VaR_95, ES_95, VaR_99, ES_99,
+        Violation_95, Violation_99.
+
+    model : str
+        Model name.
+
+    horizon : int
+        Forecast horizon in days.
+
+    Returns
+    -------
+    pd.DataFrame
+        Summary of VaR/ES performance.
+    """
+
+    results = []
+
+    if horizon == 1:
+        realized_col = "Realized_Return"
+    else:
+        realized_col = "Realized_Return_10D"
+
+    for confidence in [0.95, 0.99]:
+
+        var_col = f"VaR_{int(confidence * 100)}"
+        es_col = f"ES_{int(confidence * 100)}"
+        violation_col = (
+            f"Violation_{int(confidence * 100)}"
+        )
+
+        realized = risk_df[realized_col]
+        var = risk_df[var_col]
+        es = risk_df[es_col]
+        violations = risk_df[violation_col]
+
+        results.append({
+            "Model": model,
+            "Horizon": f"{horizon}-Day",
+            "Confidence": confidence,
+            "n_observations": len(risk_df),
+            "n_violations": int(
+                violations.sum()
+            ),
+            "observed_rate": violations.mean(),
+            "expected_rate": 1 - confidence,
+            "Average_VaR": var.mean(),
+            "Average_ES": es.mean(),
+            "Average_Realized_Loss": (
+                -realized[realized < 0].mean()
+            ),
+            "Average_Violation_Loss": (
+                -realized[violations].mean()
+                if violations.any()
+                else np.nan
+            )
+        })
+
+    return pd.DataFrame(results)
+
+def create_backtest_summary(
+    risk_df,
+    model,
+    horizon
+):
+    """
+    Combine VaR/ES statistics with
+    Kupiec and conditional coverage tests.
+    """
+
+    summary = summarize_risk_forecasts(
+        risk_df,
+        model=model,
+        horizon=horizon
+    )
+
+    for i, confidence in enumerate(
+        [0.95, 0.99]
+    ):
+
+        violation_col = (
+            f"Violation_{int(confidence * 100)}"
+        )
+
+        violations = risk_df[
+            violation_col
+        ]
+
+        kupiec = kupiec_test(
+            violations,
+            confidence_level=confidence
+        )
+
+        cc = (
+            christoffersen_conditional_coverage_test(
+                violations,
+                confidence_level=confidence
+            )
+        )
+
+        summary.loc[
+            i, "Kupiec_LR"
+        ] = kupiec["lr_statistic"]
+
+        summary.loc[
+            i, "Kupiec_p_value"
+        ] = kupiec["p_value"]
+
+        summary.loc[
+            i, "CC_LR"
+        ] = cc["CC_lr_cc"]
+
+        summary.loc[
+            i, "CC_p_value"
+        ] = cc["CC_p_value"]
+
+    return summary
