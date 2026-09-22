@@ -19,3 +19,7 @@ output/
 .DS_Store
 Thumbs.db
 
+# Add these lines to your .gitignore file:
+*.egg-info/
+build/
+dist/

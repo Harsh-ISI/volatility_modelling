@@ -1,439 +1,203 @@
+import sys
 import numpy as np
 import pandas as pd
-from scipy.stats import linregress
 
-
-def estimate_realized_variance(
-    returns,
-    window=21
-):
-    """
-    Estimate annualized variance using
-    rolling daily returns.
-    """
-
-    variance = (
-        returns
-        .rolling(window)
-        .var()
-        * 252
-    )
-
-    return variance.dropna()
-
-
-def estimate_variance_dynamics(
-    variance,
-    dt=1 / 252
-):
-    """
-    Estimate kappa and theta from the
-    discretized Heston variance process.
-    """
-
-    v = variance.values
-
-    delta_v = np.diff(v)
-    v_lag = v[:-1]
-
-    slope, intercept, _, _, _ = linregress(
-        v_lag,
-        delta_v
-    )
-
-    kappa = -slope / dt
-
-    if kappa <= 0:
-        raise ValueError(
-            "Estimated kappa is non-positive."
-        )
-
-    theta = (
-        intercept
-        / (kappa * dt)
-    )
-
-    if theta <= 0:
-        raise ValueError(
-            "Estimated theta is non-positive."
-        )
-
-    return kappa, theta
-
-
-def estimate_vol_of_vol(
-    variance,
-    kappa,
-    theta,
-    dt=1 / 252
-):
-    """
-    Estimate Heston volatility-of-volatility xi.
-    """
-
-    v = variance.values
-
-    delta_v = np.diff(v)
-    v_lag = v[:-1]
-
-    # Avoid numerical problems from zero variance
-    valid = v_lag > 1e-12
-
-    residuals = (
-        delta_v
-        - kappa
-        * (theta - v_lag)
-        * dt
-    )
-
-    xi_squared = np.mean(
-        residuals[valid] ** 2
-        / (
-            v_lag[valid] * dt
-        )
-    )
-
-    xi = np.sqrt(
-        max(xi_squared, 0)
-    )
-
-    return xi
-
-
-def estimate_correlation(
-    returns,
-    variance,
-    kappa,
-    theta,
-    xi,
-    mu,
-    dt=1 / 252
-):
-    """
-    Estimate correlation between return and
-    variance shocks.
-
-    The return r_{t+1} and variance transition
-    v_{t+1} - v_t correspond to the same
-    time interval.
-    """
-
-    # Variance at time t
-    v_t = variance.iloc[:-1].values
-
-    # Variance at time t+1
-    v_next = variance.iloc[1:].values
-
-    # Return during t -> t+1
-    r_next = returns.loc[
-        variance.index[1:]
-    ].values
-
-    valid = (
-        np.isfinite(v_t)
-        & np.isfinite(v_next)
-        & np.isfinite(r_next)
-        & (v_t > 1e-12)
-    )
-
-    v_t = v_t[valid]
-    v_next = v_next[valid]
-    r_next = r_next[valid]
-
-    # Return shock
-    z = (
-        r_next - mu * dt
-    ) / np.sqrt(
-        v_t * dt
-    )
-
-    # Variance shock
-    u = (
-        v_next
-        - v_t
-        - kappa * (theta - v_t) * dt
-    ) / (
-        xi * np.sqrt(v_t * dt)
-    )
-
-    valid_shocks = (
-        np.isfinite(z)
-        & np.isfinite(u)
-    )
-
-    if valid_shocks.sum() < 2:
-        raise ValueError(
-            "Insufficient valid observations "
-            "to estimate rho."
-        )
-
-    rho = np.corrcoef(
-        z[valid_shocks],
-        u[valid_shocks]
-    )[0, 1]
-
-    return float(
-        np.clip(rho, -0.999, 0.999)
-    )
-
-
-def estimate_heston_parameters(
-    returns,
-    window=21,
-    dt=1 / 252
-):
-    """
-    Estimate Heston parameters using a
-    two-step historical estimation procedure.
-    """
-
-    returns = returns.dropna()
-
-    # Step 1: estimate variance proxy
-    variance = estimate_realized_variance(
-        returns,
-        window=window
-    )
-
-    # Annualized drift
-    mu = returns.mean() * 252
-
-    # Step 2: estimate variance dynamics
-    kappa, theta = estimate_variance_dynamics(
-        variance,
-        dt=dt
-    )
-
-    # Step 3: estimate volatility of volatility
-    xi = estimate_vol_of_vol(
-        variance,
-        kappa,
-        theta,
-        dt=dt
-    )
-
-    # Step 4: estimate return/variance correlation
-    rho = estimate_correlation(
-        returns,
-        variance,
-        kappa,
-        theta,
-        xi,
-        mu,
-        dt=dt
-    )
-
-    # Initial variance
-    v0 = variance.iloc[-1]
-
-    return {
-        "mu": mu,
-        "kappa": kappa,
-        "theta": theta,
-        "xi": xi,
-        "rho": rho,
-        "v0": v0,
-    }
-
-
-def simulate_heston(
-    mu,
-    kappa,
-    theta,
-    xi,
-    rho,
-    v0,
-    horizon=1,
-    n_steps=None,
-    n_simulations=50000,
-    dt=1 / 252,
-    random_state=42
-):
-    """
-    Simulate portfolio returns under the Heston model.
-
-    Uses full-truncation Euler discretization to
-    handle variance paths when the Feller condition
-    is not satisfied.
-
-    Returns
-    -------
-    np.ndarray
-        Cumulative simulated returns.
-    """
-
-    if n_steps is None:
-        n_steps = horizon
-
-    rng = np.random.default_rng(random_state)
-
-    sqrt_dt = np.sqrt(dt)
-
-    # Independent standard normal shocks
-    z1 = rng.standard_normal(
-        (n_simulations, n_steps)
-    )
-
-    z2 = rng.standard_normal(
-        (n_simulations, n_steps)
-    )
-
-    # Correlated Brownian shocks
-    dW_s = z1 * sqrt_dt
-
-    dW_v = (
-        rho * z1
-        + np.sqrt(1 - rho**2) * z2
-    ) * sqrt_dt
-
-    # Initial variance
-    variance = np.full(
-        n_simulations,
-        v0
-    )
-
-    cumulative_returns = np.zeros(
-        n_simulations
-    )
-
-    for t in range(n_steps):
-
-        # Full truncation
-        variance_positive = np.maximum(
-            variance,
-            0
-        )
-
-        # Asset return
-        returns = (
-            mu * dt
-            + np.sqrt(variance_positive)
-            * dW_s[:, t]
-        )
-
-        cumulative_returns += returns
-
-        # Variance process
-        variance = (
-            variance
-            + kappa
-            * (
-                theta
-                - variance_positive
-            )
-            * dt
-            + xi
-            * np.sqrt(variance_positive)
-            * dW_v[:, t]
-        )
-
-        # Keep variance non-negative
-        variance = np.maximum(
-            variance,
-            0
-        )
-
-    return cumulative_returns
-
-
-def calculate_var_es(
-    simulated_returns,
-    confidence_level
-):
-    """
-    Calculate VaR and Expected Shortfall
-    from simulated returns.
-    """
-
-    alpha = 1 - confidence_level
-
-    var = -np.quantile(
-        simulated_returns,
-        alpha
-    )
-
-    tail_losses = simulated_returns[
-        simulated_returns <= -var
-    ]
-
-    es = -tail_losses.mean()
-
-    return var, es
+from src.statistical_tests import (
+    kupiec_test,
+    christoffersen_independence_test,
+    christoffersen_conditional_coverage_test,
+)
 
 
 def walk_forward_heston(
-    returns,
-    forecast_start,
-    forecast_end,
-    horizon=1,
-    n_simulations=10000,
-    window=21,
-    random_state=42
-):
+    portfolio_returns: pd.DataFrame | pd.Series,
+    forecast_start: str,
+    forecast_end: str,
+    horizon: int = 1,
+    overlap: bool = True,
+    spot_vol_window: int = 21,
+    n_sims: int = 20000,
+    seed: int | None = 42,
+) -> tuple[dict, pd.DataFrame]:
     """
-    Expanding-window Heston VaR/ES forecasts.
+    Expanding-window walk-forward forecasting using a simplified Heston Stochastic
+    Volatility model with Euler-Maruyama discretization (Full Truncation).
 
-    Parameters
-    ----------
-    returns : pd.Series
-        Daily portfolio returns.
-    forecast_start : str
-        Start of validation/test period.
-    forecast_end : str
-        End of validation/test period.
-    horizon : int
-        Forecast horizon in trading days.
-    n_simulations : int
-        Number of Monte Carlo paths.
+    Parameters:
+        portfolio_returns (pd.DataFrame | pd.Series): Daily log returns series or single-column DataFrame.
+        forecast_start (str): Start date of forecast window ('YYYY-MM-DD').
+        forecast_end (str): End date of forecast window ('YYYY-MM-DD').
+        horizon (int): Forecast horizon in days (1 or 10).
+        overlap (bool): Active only if horizon > 1.
+                        - If True: Step by 1 day (rolling cumulative).
+                        - If False: Step by `horizon` days (non-overlapping).
+        spot_vol_window (int): Rolling window lookback to proxy spot variance V_t.
+        n_sims (int): Number of Monte Carlo simulation paths per forecast date.
+        seed (int | None): Random seed for reproducible Monte Carlo simulation.
+
+    Returns:
+        tuple[dict, pd.DataFrame]: (summary_metrics, time_series_df)
     """
+    if seed is not None:
+        np.random.seed(seed)
 
-    forecast_dates = returns.loc[
-        forecast_start:forecast_end
-    ].index
+    # 1. Normalize input to pandas Series
+    if isinstance(portfolio_returns, pd.DataFrame):
+        returns_series = portfolio_returns.iloc[:, 0]
+    else:
+        returns_series = portfolio_returns
 
+    # 2. Determine evaluation dates
+    val_dates = returns_series.loc[forecast_start:forecast_end].index
+    if (horizon > 1) and (not overlap):
+        val_dates = val_dates[::horizon]
+
+    total_steps = len(val_dates)
     results = []
 
-    for i, date in enumerate(forecast_dates):
+    for i, date in enumerate(val_dates):
+        # Progress percentage tracker
+        pct = ((i + 1) / total_steps) * 100
+        sys.stdout.write(f"\rHeston Walk-Forward Progress: {pct:.1f}% ({i + 1}/{total_steps})")
+        sys.stdout.flush()
 
-        # Information available strictly before
-        # the forecast date
-        estimation_returns = returns[
-            returns.index < date
-        ]
+        idx_pos = returns_series.index.get_loc(date)
 
-        # Estimate Heston parameters
-        params = estimate_heston_parameters(
-            estimation_returns,
-            window=window
-        )
+        # Ensure full horizon exists in forward data
+        if idx_pos + horizon > len(returns_series):
+            break
 
-        # Simulate future cumulative returns
-        simulated_returns = simulate_heston(
-            **params,
-            horizon=horizon,
-            n_steps=horizon,
-            n_simulations=n_simulations,
-            random_state=random_state + i
-        )
+        # Extract realized return over horizon
+        future_returns = returns_series.iloc[idx_pos : idx_pos + horizon]
+        realized_return = future_returns.sum()
 
-        var_95, es_95 = calculate_var_es(
-            simulated_returns,
-            confidence_level=0.95
-        )
+        # Historical training slice
+        train_slice = returns_series.iloc[:idx_pos]
+        if len(train_slice) < spot_vol_window + 10:
+            continue
 
-        var_99, es_99 = calculate_var_es(
-            simulated_returns,
-            confidence_level=0.99
-        )
+        # 3. Estimate Physical Heston Parameters & Spot Volatility
+        mu = train_slice.mean()
+
+        # Compute rolling variance series to fit variance dynamics
+        roll_var = train_slice.rolling(window=spot_vol_window).var().dropna()
+        v_t = roll_var.iloc[-1]  # Spot variance proxy V_t at day t-1
+        theta = roll_var.mean()  # Long-run average variance
+
+        # Estimate Volatility-of-Volatility (xi)
+        d_var = roll_var.diff().dropna()
+        xi = d_var.std()
+
+        # Estimate Mean Reversion Speed (kappa) via AR(1) autocorrelation
+        if len(roll_var) > 2:
+            phi = np.corrcoef(roll_var.values[1:], roll_var.values[:-1])[0, 1]
+            kappa = max(0.01, 1.0 - phi)
+        else:
+            kappa = 0.1
+
+        # Estimate Leverage Effect (rho = corr(return, delta_variance))
+        aligned_rets = train_slice.loc[d_var.index]
+        if len(aligned_rets) > 2:
+            rho = np.corrcoef(aligned_rets.values, d_var.values)[0, 1]
+            if np.isnan(rho):
+                rho = -0.5
+        else:
+            rho = -0.5
+
+        # Sanitize parameter bounds for numerical stability
+        v_t = max(v_t, 1e-6)
+        theta = max(theta, 1e-6)
+        kappa = np.clip(kappa, 0.005, 0.5)
+        xi = np.clip(xi, 1e-5, 0.1)
+        rho = np.clip(rho, -0.99, 0.99)
+
+        # 4. Monte Carlo Simulation via Euler-Maruyama (Full Truncation)
+        v = np.full(n_sims, v_t)
+        cum_returns = np.zeros(n_sims)
+
+        for _ in range(horizon):
+            z1 = np.random.normal(size=n_sims)
+            z2 = np.random.normal(size=n_sims)
+
+            # Correlated shocks
+            z_v = z1
+            z_s = rho * z1 + np.sqrt(1.0 - rho**2) * z2
+
+            # Full Truncation: max(V, 0)
+            v_tilde = np.maximum(v, 0.0)
+
+            # Euler updates
+            v_next = v + kappa * (theta - v_tilde) + xi * np.sqrt(v_tilde) * z_v
+            r_step = (mu - 0.5 * v_tilde) + np.sqrt(v_tilde) * z_s
+
+            v = v_next
+            cum_returns += r_step
+
+        # 5. Extract Volatility, VaR, and ES from Simulated Path Distribution
+        vol_hat = np.std(cum_returns)
+
+        var_1pct = -np.percentile(cum_returns, 1.0)
+        var_5pct = -np.percentile(cum_returns, 5.0)
+
+        tail_1pct = cum_returns[cum_returns < -var_1pct]
+        es_1pct = -tail_1pct.mean() if len(tail_1pct) > 0 else var_1pct
+
+        tail_5pct = cum_returns[cum_returns < -var_5pct]
+        es_5pct = -tail_5pct.mean() if len(tail_5pct) > 0 else var_5pct
 
         results.append({
             "Date": date,
-            "VaR_95": var_95,
-            "ES_95": es_95,
-            "VaR_99": var_99,
-            "ES_99": es_99
+            "Realized_Return": realized_return,
+            "Forecast_Vol": vol_hat,
+            "VaR_1pct": var_1pct,
+            "VaR_5pct": var_5pct,
+            "ES_1pct": es_1pct,
+            "ES_5pct": es_5pct,
+            "Breach_1pct": realized_return < -var_1pct,
+            "Breach_5pct": realized_return < -var_5pct,
         })
 
-    return pd.DataFrame(
-        results
-    ).set_index("Date")
+    print("\nCompleted!")  # Newline after progress bar finishes
+
+    # Assemble time-series DataFrame
+    time_series_df = pd.DataFrame(results).set_index("Date")
+
+    # 6. Accuracy Metrics
+    realized_var = time_series_df["Realized_Return"] ** 2
+    forecast_var = time_series_df["Forecast_Vol"] ** 2
+
+    mse = np.mean((forecast_var - realized_var) ** 2)
+    mae = np.mean(np.abs(time_series_df["Forecast_Vol"] - np.abs(time_series_df["Realized_Return"])))
+    qlike = np.mean((realized_var / forecast_var) - np.log(realized_var / forecast_var) - 1)
+
+    summary_metrics = {
+        "MSE": float(mse),
+        "MAE": float(mae),
+        "QLIKE": float(qlike),
+    }
+
+    # 7. Risk & Backtesting Metrics for 1% and 5%
+    for alpha_label, alpha_val in [("1pct", 0.01), ("5pct", 0.05)]:
+        breaches = time_series_df[f"Breach_{alpha_label}"]
+        breach_count = int(breaches.sum())
+        breach_rate = float(breaches.mean())
+
+        kupiec_res = kupiec_test(breaches, alpha_val)
+        ind_res = christoffersen_independence_test(breaches)
+        cc_res = christoffersen_conditional_coverage_test(breaches, alpha_val)
+
+        exceedance_returns = time_series_df.loc[breaches, "Realized_Return"]
+        avg_loss = float(exceedance_returns.mean()) if breach_count > 0 else np.nan
+
+        summary_metrics.update({
+            f"VaR_{alpha_label}_mean": float(time_series_df[f"VaR_{alpha_label}"].mean()),
+            f"ES_{alpha_label}_mean": float(time_series_df[f"ES_{alpha_label}"].mean()),
+            f"Breach_Count_{alpha_label}": breach_count,
+            f"Breach_Rate_{alpha_label}": breach_rate,
+            f"Kupiec_pvalue_{alpha_label}": kupiec_res["p_value"],
+            f"Christoffersen_Indep_pvalue_{alpha_label}": ind_res["p_value"],
+            f"Christoffersen_CondCov_pvalue_{alpha_label}": cc_res["p_value"],
+            f"Avg_Exceedance_Loss_{alpha_label}": avg_loss,
+        })
+
+    return summary_metrics, time_series_df

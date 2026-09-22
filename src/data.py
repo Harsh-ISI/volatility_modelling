@@ -5,10 +5,6 @@ import yfinance as yf
 import sys
 
 
-PROJECT_ROOT = Path.cwd().parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.append(str(PROJECT_ROOT))
-
 from src.config import (
     RAW_DATA_DIR,
     PROCESSED_DATA_DIR,

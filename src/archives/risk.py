@@ -70,141 +70,6 @@ def kupiec_test(violations, confidence_level):
         "p_value": p_value,
     }
 
-# def christoffersen_independence_test(violations):
-#     """
-#     Christoffersen independence test for VaR violations.
-#     """
-
-#     violations = np.asarray(
-#         violations,
-#         dtype=int
-#     )
-
-#     previous = violations[:-1]
-#     current = violations[1:]
-
-#     n00 = np.sum(
-#         (previous == 0) & (current == 0)
-#     )
-
-#     n01 = np.sum(
-#         (previous == 0) & (current == 1)
-#     )
-
-#     n10 = np.sum(
-#         (previous == 1) & (current == 0)
-#     )
-
-#     n11 = np.sum(
-#         (previous == 1) & (current == 1)
-#     )
-
-#     # Transition probabilities
-#     pi01 = n01 / (n00 + n01) if (n00 + n01) > 0 else 0
-#     pi11 = n11 / (n10 + n11) if (n10 + n11) > 0 else 0
-
-#     total_transitions = (
-#         n00 + n01 + n10 + n11
-#     )
-
-#     total_violations = n01 + n11
-
-#     pi = (
-#         total_violations / total_transitions
-#         if total_transitions > 0
-#         else 0
-#     )
-
-#     # Handle boundary cases
-#     if (
-#         pi01 in [0, 1]
-#         or pi11 in [0, 1]
-#         or pi in [0, 1]
-#     ):
-#         return {
-#             "n00": n00,
-#             "n01": n01,
-#             "n10": n10,
-#             "n11": n11,
-#             "lr_statistic": np.nan,
-#             "p_value": np.nan,
-#         }
-
-#     log_likelihood_independent = (
-#         (n00 + n10) * np.log(1 - pi)
-#         + (n01 + n11) * np.log(pi)
-#     )
-
-#     log_likelihood_markov = (
-#         n00 * np.log(1 - pi01)
-#         + n01 * np.log(pi01)
-#         + n10 * np.log(1 - pi11)
-#         + n11 * np.log(pi11)
-#     )
-
-#     lr_statistic = -2 * (
-#         log_likelihood_independent
-#         - log_likelihood_markov
-#     )
-
-#     p_value = 1 - chi2.cdf(
-#         lr_statistic,
-#         df=1
-#     )
-
-#     return {
-#         "n00": n00,
-#         "n01": n01,
-#         "n10": n10,
-#         "n11": n11,
-#         "lr_statistic": lr_statistic,
-#         "p_value": p_value,
-#     }
-
-# def christoffersen_conditional_coverage_test(
-#     violations,
-#     confidence_level
-# ):
-#     """
-#     Christoffersen conditional coverage test.
-#     """
-
-#     uc = kupiec_test(
-#         violations,
-#         confidence_level
-#     )
-
-#     ind = christoffersen_independence_test(
-#         violations
-#     )
-
-#     if (
-#         np.isnan(uc["lr_statistic"])
-#         or np.isnan(ind["lr_statistic"])
-#     ):
-#         return {
-#             "lr_uc": uc["lr_statistic"],
-#             "lr_ind": ind["lr_statistic"],
-#             "lr_cc": np.nan,
-#             "p_value": np.nan,
-#         }
-
-#     lr_cc = (
-#         uc["lr_statistic"]
-#         + ind["lr_statistic"]
-#     )
-
-#     p_value = 1 - chi2.cdf(
-#         lr_cc,
-#         df=2
-#     )
-
-#     return {
-#         "lr_uc": uc["lr_statistic"],
-#         "lr_ind": ind["lr_statistic"],
-#         "lr_cc": lr_cc,
-#         "p_value": p_value,
-#     }
 
 def christoffersen_independence_test(violations):
     """
@@ -219,29 +84,19 @@ def christoffersen_independence_test(violations):
     previous = violations[:-1]
     current = violations[1:]
 
-    n00 = np.sum(
-        (previous == 0) & (current == 0)
-    )
+    n00 = np.sum((previous == 0) & (current == 0))
 
-    n01 = np.sum(
-        (previous == 0) & (current == 1)
-    )
+    n01 = np.sum((previous == 0) & (current == 1))
 
-    n10 = np.sum(
-        (previous == 1) & (current == 0)
-    )
+    n10 = np.sum((previous == 1) & (current == 0))
 
-    n11 = np.sum(
-        (previous == 1) & (current == 1)
-    )
+    n11 = np.sum((previous == 1) & (current == 1))
 
     # Transition probabilities
     pi01 = n01 / (n00 + n01) if (n00 + n01) > 0 else 0
     pi11 = n11 / (n10 + n11) if (n10 + n11) > 0 else 0
 
-    total_transitions = (
-        n00 + n01 + n10 + n11
-    )
+    total_transitions = (n00 + n01 + n10 + n11)
 
     total_violations = n01 + n11
 
@@ -251,7 +106,7 @@ def christoffersen_independence_test(violations):
         else 0
     )
 
-    # Helper function to compute n * log(p) safely (0 * log(0) = 0)
+# Helper function to compute n * log(p) safely (0 * log(0) = 0)
     def safe_n_log_p(n, p):
         return n * np.log(p) if n > 0 and p > 0 else 0.0
 
@@ -305,14 +160,9 @@ def christoffersen_conditional_coverage_test(
     Christoffersen conditional coverage test.
     """
 
-    uc = kupiec_test(
-        violations,
-        confidence_level
-    )
+    uc = kupiec_test(violations,confidence_level)
 
-    ind = christoffersen_independence_test(
-        violations
-    )
+    ind = christoffersen_independence_test(violations)
 
     if (
         np.isnan(uc["lr_statistic"])
@@ -533,17 +383,13 @@ def walk_forward_garch(
     Expanding-window one-step-ahead GARCH forecasting.
     """
 
-    forecast_dates = returns.loc[
-        forecast_start:forecast_end
-    ].index
+    forecast_dates = returns.loc[forecast_start:forecast_end].index
 
     forecasts = []
 
     for date in forecast_dates:
 
-        estimation_data = returns[
-            returns.index < date
-        ] * 100
+        estimation_data = returns[returns.index < date] * 100
 
         model = arch_model(
             estimation_data,
@@ -569,14 +415,10 @@ def walk_forward_garch(
         forecasts.append({
             "Date": date,
             "Realized_Return": returns.loc[date],
-            "Forecast_Volatility": np.sqrt(
-                variance_forecast
-            ) / 100
+            "Forecast_Volatility": np.sqrt(variance_forecast) / 100
         })
 
     return pd.DataFrame(forecasts).set_index("Date")
-
-
 
 
 def summarize_risk_forecasts(
